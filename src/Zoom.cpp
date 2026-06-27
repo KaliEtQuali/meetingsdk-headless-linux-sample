@@ -1,4 +1,6 @@
 #include "Zoom.h"
+#include "picojson/picojson.h"
+#include <glib.h>
 
 SDKError Zoom::config(int ac, char** av) {
     auto status = m_config.read(ac, av);
@@ -6,16 +8,15 @@ SDKError Zoom::config(int ac, char** av) {
         Log::error("failed to read configuration");
         return SDKERR_INTERNAL_ERROR;
     }
-
     return SDKERR_SUCCESS;
 }
 
-SDKError Zoom::init() { 
+SDKError Zoom::init() {
     InitParam initParam;
 
     auto host = m_config.zoomHost().c_str();
 
-    initParam.strWebDomain = host;
+    initParam.strWebDomain  = host;
     initParam.strSupportUrl = host;
 
     initParam.emLanguageID = LANGUAGE_English;
@@ -51,14 +52,13 @@ SDKError Zoom::createServices() {
 SDKError Zoom::auth() {
     SDKError err{SDKERR_UNINITIALIZE};
 
-    auto id = m_config.clientId();
+    auto id     = m_config.clientId();
     auto secret = m_config.clientSecret();
 
     if (id.empty()) {
         Log::error("Client ID cannot be blank");
         return err;
     }
-
 
     if (secret.empty()) {
         Log::error("Client Secret cannot be blank");
@@ -71,32 +71,30 @@ SDKError Zoom::auth() {
     generateJWT(m_config.clientId(), m_config.clientSecret());
 
     AuthContext ctx;
-    ctx.jwt_token =  m_jwt.c_str();
+    ctx.jwt_token = m_jwt.c_str();
 
     return m_authService->SDKAuth(ctx);
 }
 
 void Zoom::generateJWT(const string& key, const string& secret) {
-
     m_iat = std::chrono::system_clock::now();
     m_exp = m_iat + std::chrono::hours{24};
 
     m_jwt = jwt::create()
-            .set_type("JWT")
-            .set_issued_at(m_iat)
-            .set_expires_at(m_exp)
-            .set_payload_claim("appKey", claim(key))
-            .set_payload_claim("tokenExp", claim(m_exp))
-            .sign(algorithm::hs256{secret});
+        .set_type("JWT")
+        .set_issued_at(m_iat)
+        .set_expires_at(m_exp)
+        .set_payload_claim("appKey", claim(key))
+        .set_payload_claim("tokenExp", claim(m_exp))
+        .sign(algorithm::hs256{secret});
 }
 
 SDKError Zoom::join() {
     SDKError err{SDKERR_UNINITIALIZE};
 
-    auto mid = m_config.meetingId();
-    auto password = m_config.password();
+    auto mid         = m_config.meetingId();
+    auto password    = m_config.password();
     auto displayName = m_config.displayName();
-
 
     if (mid.empty()) {
         Log::error("Meeting ID cannot be blank");
@@ -114,8 +112,8 @@ SDKError Zoom::join() {
     }
 
     auto meetingNumber = stoull(mid);
-    auto userName = displayName.c_str();
-    auto psw = password.c_str();
+    auto userName      = displayName.c_str();
+    auto psw           = password.c_str();
 
     JoinParam joinParam;
     joinParam.userType = ZOOM_SDK_NAMESPACE::SDK_UT_WITHOUT_LOGIN;
@@ -123,13 +121,13 @@ SDKError Zoom::join() {
     JoinParam4WithoutLogin& param = joinParam.param.withoutloginuserJoin;
 
     param.meetingNumber = meetingNumber;
-    param.userName = userName;
-    param.psw = psw;
-    param.vanityID = nullptr;
-    param.customer_key = nullptr;
-    param.webinarToken = nullptr;
-    param.isVideoOff = false;
-    param.isAudioOff = false;
+    param.userName      = userName;
+    param.psw           = psw;
+    param.vanityID      = nullptr;
+    param.customer_key  = nullptr;
+    param.webinarToken  = nullptr;
+    param.isVideoOff    = false;
+    param.isAudioOff    = false;
 
     if (!m_config.zak().empty()) {
         Log::success("used ZAK token");
@@ -149,7 +147,6 @@ SDKError Zoom::join() {
     if (m_config.useRawAudio()) {
         auto* audioSettings = m_settingService->GetAudioSettings();
         if (!audioSettings) return SDKERR_INTERNAL_ERROR;
-
         audioSettings->EnableAutoJoinAudio(true);
     }
 
@@ -162,11 +159,11 @@ SDKError Zoom::start() {
     StartParam startParam;
     startParam.userType = SDK_UT_NORMALUSER;
 
-    StartParam4NormalUser  normalUser;
-    normalUser.vanityID = nullptr;
+    StartParam4NormalUser normalUser;
+    normalUser.vanityID    = nullptr;
     normalUser.customer_key = nullptr;
-    normalUser.isAudioOff = false;
-    normalUser.isVideoOff = false;
+    normalUser.isAudioOff  = false;
+    normalUser.isVideoOff  = false;
 
     err = m_meetingService->Start(startParam);
     hasError(err, "start meeting");
@@ -175,14 +172,14 @@ SDKError Zoom::start() {
 }
 
 SDKError Zoom::leave() {
-    if (!m_meetingService) 
+    if (!m_meetingService)
         return SDKERR_UNINITIALIZE;
 
     auto status = m_meetingService->GetMeetingStatus();
     if (status == MEETING_STATUS_IDLE)
         return SDKERR_WRONG_USAGE;
 
-    return  m_meetingService->Leave(LEAVE_MEETING);
+    return m_meetingService->Leave(LEAVE_MEETING);
 }
 
 SDKError Zoom::clean() {
@@ -224,16 +221,16 @@ SDKError Zoom::startRawRecording() {
     if (m_config.useRawVideo()) {
         if (!m_renderDelegate) {
             m_renderDelegate = new ZoomSDKRendererDelegate();
-            m_videoSource = new ZoomSDKVideoSource();
+            m_videoSource    = new ZoomSDKVideoSource();
         }
 
         err = createRenderer(&m_videoHelper, m_renderDelegate);
         if (hasError(err, "create raw video renderer"))
             return err;
 
-        m_renderDelegate->setDir(m_config.videoDir());
+        m_renderDelegate->setDir(m_renderDelegate->dir());
         m_renderDelegate->setFilename(m_config.videoFile());
-        
+
         auto participantCtl = m_meetingService->GetMeetingParticipantsController();
         auto uid = participantCtl->GetParticipantsList()->GetItem(0);
 
@@ -243,38 +240,14 @@ SDKError Zoom::startRawRecording() {
             return err;
 
         Log::info("writing video raw data to " + m_renderDelegate->dir() + "/" + m_renderDelegate->filename());
-
-  /*      auto* videoSourceHelper = GetRawdataVideoSourceHelper();
-        if (!videoSourceHelper) {
-            Log::error("Initializing Video Source Helper");
-            return SDKERR_UNINITIALIZE;
-        }
-
-        err = videoSourceHelper->setExternalVideoSource(m_videoSource);
-        if (hasError(err, "set video source"))
-            return err;
-
-        auto* videoSettings = m_settingService->GetVideoSettings();
-        videoSettings->EnableAutoTurnOffVideoWhenJoinMeeting(false);
-
-       auto* sender = m_videoSource->getSender();
-        SDKError e;
-        do {
-            Log::info("attempting unmute");
-            auto* videoCtl = m_meetingService->GetMeetingVideoController();
-            e = videoCtl->UnmuteVideo();
-            if (hasError(e, "unmute")) sleep(1);
-        } while (hasError(e));*/
-
     }
 
     if (m_config.useRawAudio()) {
         auto* audioController = m_meetingService->GetMeetingAudioController();
         if (audioController) {
             auto voipErr = audioController->JoinVoip();
-            if (hasError(voipErr, "join VoIP")) {
+            if (hasError(voipErr, "join VoIP"))
                 Log::error("Failed to join VoIP audio");
-            }
         }
 
         m_audioHelper = GetAudioRawdataHelper();
@@ -283,7 +256,7 @@ SDKError Zoom::startRawRecording() {
 
         if (!m_audioSource) {
             auto mixedAudio = !m_config.separateParticipantAudio();
-            auto transcribe = m_config.transcribe();
+            auto transcribe  = m_config.transcribe();
 
             m_audioSource = new ZoomSDKAudioRawDataDelegate(mixedAudio, transcribe);
             m_audioSource->setDir(m_config.audioDir());
@@ -304,7 +277,6 @@ SDKError Zoom::stopRawRecording() {
     auto recCtrl = m_meetingService->GetMeetingRecordingController();
     auto err = recCtrl->StopRawRecording();
     hasError(err, "stop raw recording");
-
     return err;
 }
 
@@ -312,11 +284,10 @@ bool Zoom::isMeetingStart() {
     return m_config.isMeetingStart();
 }
 
-
 bool Zoom::hasError(const SDKError e, const string& action) {
     auto isError = e != SDKERR_SUCCESS;
 
-    if(!action.empty()) {
+    if (!action.empty()) {
         if (isError) {
             stringstream ss;
             ss << "failed to " << action << " with status " << e;
@@ -326,4 +297,125 @@ bool Zoom::hasError(const SDKError e, const string& action) {
         }
     }
     return isError;
+}
+
+// ── Waiting room & socket commands ────────────────────────────────────────────
+
+string Zoom::handleSocketCommand(const string& raw) {
+    picojson::value v;
+    string err = picojson::parse(v, raw);
+    if (!err.empty() || !v.is<picojson::object>())
+        return "{\"error\": \"invalid JSON\"}";
+
+    auto obj = v.get<picojson::object>();
+    if (obj.find("action") == obj.end())
+        return "{\"error\": \"missing action\"}";
+
+    auto action = obj["action"].get<string>();
+
+    if (action == "list_participants")
+        return listParticipants();
+
+    if (action == "list_waiting_room")
+        return listWaitingRoom();
+
+    if (action == "admit") {
+        if (obj.find("user_id") == obj.end())
+            return "{\"error\": \"missing user_id\"}";
+        auto uid = (unsigned int)obj["user_id"].get<double>();
+        return admitUser(uid);
+    }
+
+    if (action == "put_in_waiting_room") {
+        if (obj.find("user_id") == obj.end())
+            return "{\"error\": \"missing user_id\"}";
+        auto uid = (unsigned int)obj["user_id"].get<double>();
+        return putInWaitingRoom(uid);
+    }
+
+    return "{\"error\": \"unknown action: " + action + "\"}";
+}
+
+string Zoom::listParticipants() {
+    auto* ctrl = m_meetingService->GetMeetingParticipantsController();
+    if (!ctrl)
+        return "{\"error\": \"no participants controller\"}";
+
+    auto* lst = ctrl->GetParticipantsList();
+    picojson::array arr;
+
+    if (lst) {
+        for (int i = 0; i < lst->GetCount(); i++) {
+            auto uid   = lst->GetItem(i);
+            auto* info = ctrl->GetUserByUserID(uid);
+            picojson::object p;
+            p["user_id"] = picojson::value((double)uid);
+            p["name"]    = picojson::value(info ? string(info->GetUserName()) : "?");
+            arr.push_back(picojson::value(p));
+        }
+    }
+
+    return picojson::value(arr).serialize();
+}
+
+string Zoom::listWaitingRoom() {
+    if (!m_waitingRoomController)
+        return "{\"error\": \"waiting room controller not ready\"}";
+
+    auto* lst = m_waitingRoomController->GetWaitingRoomLst();
+    picojson::array arr;
+
+    if (lst) {
+        for (int i = 0; i < lst->GetCount(); i++) {
+            auto uid   = lst->GetItem(i);
+            auto* info = m_waitingRoomController->GetWaitingRoomUserInfoByID(uid);
+            picojson::object p;
+            p["user_id"] = picojson::value((double)uid);
+            p["name"]    = picojson::value(info ? string(info->GetUserName()) : "?");
+            arr.push_back(picojson::value(p));
+        }
+    }
+
+    return picojson::value(arr).serialize();
+}
+
+struct AdmitData {
+    IMeetingWaitingRoomController* ctrl;
+    unsigned int userID;
+};
+
+string Zoom::admitUser(unsigned int userID) {
+    if (!m_waitingRoomController)
+        return "{\"error\": \"waiting room controller not ready\"}";
+
+    // Poster l'action dans le thread principal via GLib
+    auto* data = new AdmitData{m_waitingRoomController, userID};
+    g_idle_add([](gpointer d) -> gboolean {
+        auto* admit = static_cast<AdmitData*>(d);
+        admit->ctrl->AdmitToMeeting(admit->userID);
+        delete admit;
+        return G_SOURCE_REMOVE;
+    }, data);
+
+    return "{\"success\": true, \"action\": \"admitted\", \"user_id\": " + to_string(userID) + "}";
+}
+
+struct WaitingRoomData {
+    IMeetingWaitingRoomController* ctrl;
+    unsigned int userID;
+};
+
+string Zoom::putInWaitingRoom(unsigned int userID) {
+    if (!m_waitingRoomController)
+        return "{\"error\": \"waiting room controller not ready\"}";
+
+    auto* data = new WaitingRoomData{m_waitingRoomController, userID};
+    g_idle_add([](gpointer d) -> gboolean {
+        auto* wr = static_cast<WaitingRoomData*>(d);
+        wr->ctrl->PutInWaitingRoom(wr->userID);
+        delete wr;
+        return G_SOURCE_REMOVE;
+    }, data);
+
+    return "{\"success\": true, \"action\": \"put_in_waiting_room\", \"user_id\": " + to_string(userID) + "}";
 }
