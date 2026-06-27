@@ -1,4 +1,5 @@
 #include "SocketServer.h"
+#include <glib.h>
 
 SocketServer::SocketServer() {
     pthread_mutex_init(&m_mutex, NULL);

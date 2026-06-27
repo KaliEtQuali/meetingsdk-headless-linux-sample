@@ -1,5 +1,6 @@
 #include "Zoom.h"
 #include "picojson/picojson.h"
+#include <glib.h>
 
 SDKError Zoom::config(int ac, char** av) {
     auto status = m_config.read(ac, av);
@@ -378,24 +379,43 @@ string Zoom::listWaitingRoom() {
     return picojson::value(arr).serialize();
 }
 
+struct AdmitData {
+    IMeetingWaitingRoomController* ctrl;
+    unsigned int userID;
+};
+
 string Zoom::admitUser(unsigned int userID) {
     if (!m_waitingRoomController)
         return "{\"error\": \"waiting room controller not ready\"}";
 
-    auto err = m_waitingRoomController->AdmitToMeeting(userID);
-    if (err != SDKERR_SUCCESS)
-        return "{\"error\": \"admit failed\", \"code\": " + to_string(err) + "}";
+    // Poster l'action dans le thread principal via GLib
+    auto* data = new AdmitData{m_waitingRoomController, userID};
+    g_idle_add([](gpointer d) -> gboolean {
+        auto* admit = static_cast<AdmitData*>(d);
+        admit->ctrl->AdmitToMeeting(admit->userID);
+        delete admit;
+        return G_SOURCE_REMOVE;
+    }, data);
 
     return "{\"success\": true, \"action\": \"admitted\", \"user_id\": " + to_string(userID) + "}";
 }
+
+struct WaitingRoomData {
+    IMeetingWaitingRoomController* ctrl;
+    unsigned int userID;
+};
 
 string Zoom::putInWaitingRoom(unsigned int userID) {
     if (!m_waitingRoomController)
         return "{\"error\": \"waiting room controller not ready\"}";
 
-    auto err = m_waitingRoomController->PutInWaitingRoom(userID);
-    if (err != SDKERR_SUCCESS)
-        return "{\"error\": \"put_in_waiting_room failed\", \"code\": " + to_string(err) + "}";
+    auto* data = new WaitingRoomData{m_waitingRoomController, userID};
+    g_idle_add([](gpointer d) -> gboolean {
+        auto* wr = static_cast<WaitingRoomData*>(d);
+        wr->ctrl->PutInWaitingRoom(wr->userID);
+        delete wr;
+        return G_SOURCE_REMOVE;
+    }, data);
 
     return "{\"success\": true, \"action\": \"put_in_waiting_room\", \"user_id\": " + to_string(userID) + "}";
 }
