@@ -11,7 +11,8 @@
 #include "Config.h"
 #include "util/Singleton.h"
 #include "util/Log.h"
-
+#include "util/SocketServer.h"
+#include "WaitingRoomEvent.h"
 
 #include "zoom_sdk.h"
 #include "rawdata/zoom_rawdata_api.h"
@@ -20,6 +21,7 @@
 #include "meeting_service_components/meeting_audio_interface.h"
 #include "meeting_service_components/meeting_participants_ctrl_interface.h"
 #include "meeting_service_components/meeting_video_interface.h"
+#include "meeting_service_components/meeting_waiting_room_interface.h"
 #include "setting_service_interface.h"
 
 #include "events/AuthServiceEvent.h"
@@ -49,48 +51,66 @@ class Zoom : public Singleton<Zoom> {
     time_point m_iat;
     time_point m_exp;
 
-    IMeetingService* m_meetingService;
-    ISettingService* m_settingService;
-    IAuthService* m_authService;
+    IMeetingService*              m_meetingService        = nullptr;
+    ISettingService*              m_settingService        = nullptr;
+    IAuthService*                 m_authService           = nullptr;
+    IMeetingWaitingRoomController* m_waitingRoomController = nullptr;
+    WaitingRoomEvent*             m_waitingRoomEvent      = nullptr;
 
-    IZoomSDKRenderer* m_videoHelper;
-    ZoomSDKRendererDelegate* m_renderDelegate;
+    IZoomSDKRenderer*             m_videoHelper           = nullptr;
+    ZoomSDKRendererDelegate*      m_renderDelegate        = nullptr;
 
-    IZoomSDKAudioRawDataHelper* m_audioHelper;
-    ZoomSDKAudioRawDataDelegate* m_audioSource;
+    IZoomSDKAudioRawDataHelper*   m_audioHelper           = nullptr;
+    ZoomSDKAudioRawDataDelegate*  m_audioSource           = nullptr;
 
-    ZoomSDKVideoSource* m_videoSource;
+    ZoomSDKVideoSource*           m_videoSource           = nullptr;
 
     SDKError createServices();
     void generateJWT(const string& key, const string& secret);
 
     /**
      * Callback fired when the SDK authenticates the credentials
-    */
+     */
     function<void()> onAuth = [&]() {
         auto e = isMeetingStart() ? start() : join();
         string action = isMeetingStart() ? "start" : "join";
-        
-        if(hasError(e, action + " a meeting")) exit(e);
+        if (hasError(e, action + " a meeting")) exit(e);
     };
 
     /**
-     * Callback fires when the app joins the meeting
-    */
+     * Callback fired when the app joins the meeting
+     */
     function<void()> onJoin = [&]() {
+        // ── Reminder controller (existant) ──
         auto* reminderController = m_meetingService->GetMeetingReminderController();
         reminderController->SetEvent(new MeetingReminderEvent());
 
-        if (!m_config.useRawRecording())  
-            return;
+        // ── Waiting room controller (nouveau) ──
+        m_waitingRoomController = m_meetingService->GetMeetingWaitingRoomController();
+        if (m_waitingRoomController) {
+            m_waitingRoomEvent = new WaitingRoomEvent();
+            m_waitingRoomController->SetEvent(m_waitingRoomEvent);
+            Log::success("waiting room controller ready");
+        } else {
+            Log::error("failed to get waiting room controller");
+        }
 
+        // ── Socket server (nouveau) ──
+        auto& socketServer = SocketServer::getInstance();
+        socketServer.setCommandHandler([this](const string& cmd) {
+            return handleSocketCommand(cmd);
+        });
+        socketServer.start();
+
+        // ── Raw recording (existant) ──
+        if (!m_config.useRawRecording())
+            return;
 
         function<void(bool)> onRecordingPrivilegeChanged = [&](bool canRec) {
             if (!canRec) {
                 Log::error("Failed to get recording privilege");
                 return;
             }
-
             startRawRecording();
         };
 
@@ -99,7 +119,6 @@ class Zoom : public Singleton<Zoom> {
         recCtl->SetEvent(recordingEvent);
 
         SDKError err = recCtl->CanStartRawRecording();
-
         if (hasError(err)) {
             Log::info("requesting local recording privilege");
             recCtl->RequestLocalRecordingPrivilege();
@@ -108,6 +127,7 @@ class Zoom : public Singleton<Zoom> {
 
 public:
     Zoom() {};
+
     SDKError init();
     SDKError auth();
     SDKError config(int ac, char** av);
@@ -115,7 +135,6 @@ public:
     SDKError join();
     SDKError start();
     SDKError leave();
-
     SDKError clean();
 
     SDKError startRawRecording();
@@ -123,8 +142,14 @@ public:
 
     bool isMeetingStart();
 
-    static bool hasError(SDKError e, const string& action="");
+    // ── Waiting room & socket commands (nouveau) ──
+    string handleSocketCommand(const string& json);
+    string listParticipants();
+    string listWaitingRoom();
+    string admitUser(unsigned int userID);
+    string putInWaitingRoom(unsigned int userID);
 
+    static bool hasError(SDKError e, const string& action = "");
 };
 
 #endif //MEETING_SDK_LINUX_SAMPLE_ZOOM_H
