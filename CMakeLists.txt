@@ -28,7 +28,7 @@ include_directories( ${OpenCV_INCLUDE_DIRS} )
 
 find_package(OpenSSL REQUIRED)
 
-include_directories(${ZOOM_SDK}/h)
+include_directories(${ZOOM_SDK})
 link_directories(${ZOOM_SDK} ${ZOOM_SDK})
 link_directories(${ZOOM_SDK} ${ZOOM_SDK}/qt_libs/**)
 

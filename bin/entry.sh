@@ -36,7 +36,6 @@ build() {
   # Configure CMake if this is the first run
   [[ ! -d "$BUILD" ]] && {
     cmake -B "$BUILD" -S . --preset debug || exit;
-    npm --prefix=client install
   }
 
   # Rename the shared library
